@@ -43,6 +43,12 @@ def main():
         "Card Options":  {"files": {}},
         "Card Image":    {"files": {}},
         "Post Date":     {"date": {}},
+        "Seasons":       {"rich_text": {}},
+        "ERA":           {"number": {"format": "number"}},
+        "W":             {"number": {"format": "number"}},
+        "L":             {"number": {"format": "number"}},
+        "SO":            {"number": {"format": "number"}},
+        "BB":            {"number": {"format": "number"}},
         # Core fields — add if missing
         "Team":              {"rich_text": {}},
         "Years":             {"rich_text": {}},

@@ -199,7 +199,8 @@ COMEDIC_ANGLES = [
     "managerial_error",  # a mistake by or involving this player that cost games
     "injury",            # an injury with suspicious or comic circumstances
     "off_field_job",     # a real or rumored second job or side business during the career
-    "quiet_competence",  # a quietly competent player nobody noticed or remembered
+    "specific_object",   # one named object (a glove, a hat, a car, a dog) that shaped the career
+    "ballpark_incident", # one dated event at a specific ballpark, train or hotel
 ]
 
 VOICE_RULES = """You write biographical entries for fictional minor-league and journeyman major-league baseball players from 1887 to 2000. These players did not exist.
@@ -220,6 +221,13 @@ Chester "Frosty" Pruett — 2B, .218 lifetime, renowned for his ability to groun
 Roscoe "Blimp" Creel — Caught for six teams in nine years. His throw to second base was described by the Akron Beacon as "a committed gesture."
 Elwood "Rattles" Coombs — Career WAR of -2.1. His lifetime batting average improved .006 points following a beaning in 1931. He never mentioned this.
 
+Story strength:
+- Every story is built on one concrete, checkable detail: a date, a count, a named object, a named place, a quoted newspaper phrase. That detail is the joke.
+- The story adds something new. It never restates the stat_note.
+- Do not use the "nobody noticed him" shape: never interviewed, made no public statements, never discussed, without being noted, broadly accepted. It is overused.
+- No two players in a batch share the same joke shape.
+- Every number in the stat_note and story must agree with the player's season lines.
+
 Do not write things like:
 - "Despite this, he..." (telegraphs the joke)
 - "Remarkably..." or "Incredibly..." (announcing the joke)
@@ -230,17 +238,48 @@ POST_TEMPLATE = """{name}
 {position}, {team} · {years}
 
 Career WAR: {war}
-{season}: {avg} / {hr} HR / {rbi} RBI
+{season}: {line}
 
 {stat_note}
 
 {story}"""
 
+PITCHER_POSITIONS = {"SP", "RP", "P"}
+
+
+def best_season_line(p: dict) -> str:
+    """The best-season stat line: ERA, W-L, K, BB for pitchers; AVG, HR, RBI for batters."""
+    if p.get("position") in PITCHER_POSITIONS:
+        era = p.get("earned_run_avg")
+        if era is None:                    # players drafted before pitchers had their own fields
+            era, w, l, so, bb = p.get("avg") or 0, p.get("hr") or 0, p.get("rbi") or 0, None, None
+        else:
+            w, l, so, bb = p.get("w") or 0, p.get("l") or 0, p.get("so"), p.get("bb")
+        line = f"{float(era):.2f} ERA / {w}-{l}"
+        if so is not None:
+            line += f" / {so} K"
+        if bb is not None:
+            line += f" / {bb} BB"
+        return line
+    avg = p.get("avg") or 0
+    avg_str = f".{int(round(avg * 1000)):03d}" if avg < 1 else f"{avg:.3f}"
+    return f"{avg_str} / {p.get('hr', 0)} HR / {p.get('rbi', 0)} RBI"
+
+
+def format_post(p: dict) -> str:
+    years = p.get("years") or f"{p.get('year_start', '')}–{p.get('year_end', '')}"
+    return POST_TEMPLATE.format(
+        name=p["name"], position=p["position"], team=p["team"], years=years,
+        war=p.get("career_war", "—"), season=p.get("best_season_year", ""),
+        line=best_season_line(p), stat_note=p.get("stat_note", ""), story=p.get("story", ""),
+    )
+
 MAX_POST_CHARS = 280
-MAX_STORY_CHARS = 130
-MAX_STAT_NOTE_CHARS = 60
+MAX_STORY_CHARS = 95
+MAX_STAT_NOTE_CHARS = 50
 CARDS_DIR = "cards"
 LAHMAN_NAMES_FILE = "lahman_names.json"
 BATCH_CANDIDATES = 25
 TOP_N_TO_NOTION = 8
+MIN_SCORE_TO_NOTION = 7   # drafts the critic scores below this never reach Notion
 LOW_QUEUE_THRESHOLD = 7

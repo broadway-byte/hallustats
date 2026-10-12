@@ -18,7 +18,7 @@ import requests
 import tweepy
 from dotenv import load_dotenv
 
-from config import LOW_QUEUE_THRESHOLD, MAX_POST_CHARS, POST_TEMPLATE
+from config import LOW_QUEUE_THRESHOLD, MAX_POST_CHARS, format_post
 from notion_client import NotionClient
 
 load_dotenv()
@@ -28,22 +28,7 @@ log = logging.getLogger(__name__)
 
 # ── Post text ────────────────────────────────────────────────────────────────
 
-def format_post(player: dict) -> str:
-    avg_raw = player.get("avg") or 0
-    avg_str = f".{int(avg_raw * 1000):03d}" if avg_raw < 1 else f"{avg_raw:.2f}"
-    return POST_TEMPLATE.format(
-        name=player["name"],
-        position=player["position"],
-        team=player["team"],
-        years=player.get("years", ""),
-        war=player.get("career_war", "—"),
-        season=player.get("best_season_year", ""),
-        avg=avg_str,
-        hr=player.get("hr", 0),
-        rbi=player.get("rbi", 0),
-        stat_note=player.get("stat_note", ""),
-        story=player.get("story", ""),
-    )
+# format_post lives in config.py so the batch length check and the bot agree.
 
 
 # ── X / Twitter client ───────────────────────────────────────────────────────

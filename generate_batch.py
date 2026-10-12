@@ -27,7 +27,9 @@ from config import (
     TOP_N_TO_NOTION,
     VOICE_RULES,
     MAX_POST_CHARS,
-    POST_TEMPLATE,
+    format_post,
+    MIN_SCORE_TO_NOTION,
+    PITCHER_POSITIONS,
     MAX_STORY_CHARS,
     MAX_STAT_NOTE_CHARS,
 )
@@ -155,11 +157,21 @@ SLOT ASSIGNMENTS (era / position / angle are assigned; do not deviate):
 {slots_text}
 Rules for stats:
 - career_war: -5.0 to +2.5
-- avg: batting average 0.158–0.291 (pitchers: ERA 3.20–6.80, use avg field for ERA value)
-- hr: 0–22 career home runs (pitchers: season wins, 5–18)
-- rbi: season RBI (pitchers: season losses, 3–14)
-- stat_note: max {MAX_STAT_NOTE_CHARS} characters — one specific, deadpan career fact
-- story: max {MAX_STORY_CHARS} characters — the deadpan biography closing line
+- best_season_year is the player's best season. Fill the best-season fields for his position only:
+  batters (1B 2B 3B SS C LF CF RF): avg 0.158–0.291, hr that season (0–22), rbi that season
+  pitchers (SP RP): earned_run_avg 3.20–6.80, w and l (SP 5–18 wins, RP 1–9), so (strikeouts), bb (walks)
+  Leave the other position's fields out.
+- seasons: one line for EVERY season from year_start to year_end, all with this one team.
+  batters: year, g, ab, r, h, doubles, triples, hr, rbi (h/ab is the average)
+  pitchers: year, g, ip, w, l, so, bb, era
+  The best season's line must match the best-season fields exactly (for batters, h/ab rounds to avg).
+  Seasons should look like a real minor-league career: partial first and last years, an off year, an injury year if the story mentions one.
+- Every number in stat_note and story must agree with the season lines.
+
+Rules for copy (posts are capped at 280 characters, so these limits are hard):
+- stat_note: max {MAX_STAT_NOTE_CHARS} characters, one specific deadpan career fact
+- story: max {MAX_STORY_CHARS} characters, the deadpan closing line, built on one concrete detail
+- Avoid the "nobody noticed him" shape and do not repeat a joke shape within the batch
 
 Use the submit_players tool to return all {BATCH_CANDIDATES} players."""
 
@@ -191,13 +203,35 @@ DRAFT_TOOL = {
                         "avg":              {"type": "number"},
                         "hr":               {"type": "integer"},
                         "rbi":              {"type": "integer"},
+                        "earned_run_avg":   {"type": "number"},
+                        "w":                {"type": "integer"},
+                        "l":                {"type": "integer"},
+                        "so":               {"type": "integer"},
+                        "bb":               {"type": "integer"},
+                        "seasons": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "year": {"type": "integer"}, "g": {"type": "integer"},
+                                    "ab": {"type": "integer"}, "r": {"type": "integer"},
+                                    "h": {"type": "integer"}, "doubles": {"type": "integer"},
+                                    "triples": {"type": "integer"}, "hr": {"type": "integer"},
+                                    "rbi": {"type": "integer"},
+                                    "ip": {"type": "integer"}, "w": {"type": "integer"},
+                                    "l": {"type": "integer"}, "so": {"type": "integer"},
+                                    "bb": {"type": "integer"}, "era": {"type": "number"},
+                                },
+                                "required": ["year", "g"],
+                            },
+                        },
                         "stat_note":        {"type": "string"},
                         "story":            {"type": "string"},
                     },
                     "required": [
                         "name", "position", "team", "year_start", "year_end",
-                        "era", "career_war", "best_season_year", "avg", "hr",
-                        "rbi", "stat_note", "story",
+                        "era", "career_war", "best_season_year",
+                        "seasons", "stat_note", "story",
                     ],
                 },
             }
@@ -236,7 +270,7 @@ def generate_drafts(client: anthropic.Anthropic, system: str, user: str) -> list
     log.info(f"Drafting {BATCH_CANDIDATES} players with {CLAUDE_DRAFT_MODEL}...")
     response = client.messages.create(
         model=CLAUDE_DRAFT_MODEL,
-        max_tokens=8000,
+        max_tokens=20000,
         system=system,
         tools=[DRAFT_TOOL],
         tool_choice={"type": "tool", "name": "submit_players"},
@@ -273,6 +307,11 @@ def run_critic(client: anthropic.Anthropic, players: list, approved: list) -> li
 3. Flat final line — does not escalate, does not resolve, just stops
 4. Originality — name, team, angle are distinct from approved roster below
 5. Post fit — stat_note + story feel like a complete, satisfying 280-character post
+6. Concrete detail — the story turns on one checkable detail (date, count, named object or place). Vague stories score 5 or lower.
+7. Freshness — the "nobody noticed him / never interviewed / no public statements" shape scores 4 or lower. Two drafts with the same joke shape: score the weaker one 4 or lower.
+8. The story must add something; if it restates the stat_note, score 5 or lower.
+
+Be strict. A 9–10 should be rare. Most drafts land 5–7.
 
 Approved roster (what a 9–10 looks like):
 {examples}
@@ -300,24 +339,53 @@ One honest note per player. Mark anything that announces the joke or winks at th
     return players
 
 
-# ── Post text builder (for length validation) ─────────────────────────────────
+# ── Season lines ──────────────────────────────────────────────────────────────
 
-def format_post(p: dict) -> str:
-    avg_raw = p.get("avg", 0) or 0
-    avg_str = f".{int(avg_raw * 1000):03d}" if avg_raw < 1 else f"{avg_raw:.2f}"
-    return POST_TEMPLATE.format(
-        name=p["name"],
-        position=p["position"],
-        team=p["team"],
-        years=f"{p['year_start']}–{p['year_end']}",
-        war=p["career_war"],
-        season=p["best_season_year"],
-        avg=avg_str,
-        hr=p["hr"],
-        rbi=p["rbi"],
-        stat_note=p["stat_note"],
-        story=p["story"],
-    )
+def repair_seasons(p: dict) -> bool:
+    """Check the writer's season lines; make the best season match the headline stats.
+
+    Returns False if the lines are unusable (missing, or no best season).
+    The headline (avg/hr/rbi) is what the post shows, so it wins any disagreement.
+    """
+    seasons = p.get("seasons") or []
+    lo, hi = p.get("year_start"), p.get("year_end")
+    seasons = [x for x in seasons if isinstance(x, dict) and isinstance(x.get("year"), int)
+               and lo <= x["year"] <= hi]
+    seen = set()
+    seasons = [x for x in sorted(seasons, key=lambda x: x["year"])
+               if not (x["year"] in seen or seen.add(x["year"]))]
+    best = next((x for x in seasons if x["year"] == p.get("best_season_year")), None)
+    if not seasons or best is None:
+        return False
+    if p.get("position") in PITCHER_POSITIONS:
+        if p.get("earned_run_avg") is None or p.get("w") is None or p.get("l") is None:
+            return False
+        best["era"], best["w"], best["l"] = round(float(p["earned_run_avg"]), 2), int(p["w"]), int(p["l"])
+        if p.get("so") is not None:
+            best["so"] = int(p["so"])
+        if p.get("bb") is not None:
+            best["bb"] = int(p["bb"])
+        for k in ("avg", "hr", "rbi"):
+            p.pop(k, None)
+        for x in seasons:
+            for k in ("ip", "w", "l", "so", "bb"):
+                x[k] = max(0, int(x.get(k) or 0))
+            x["era"] = round(float(x.get("era") or 0), 2)
+    else:
+        if p.get("avg") is None or p.get("hr") is None or p.get("rbi") is None:
+            return False
+        for k in ("earned_run_avg", "w", "l", "so", "bb"):
+            p.pop(k, None)
+        for x in seasons:
+            for k in ("ab", "r", "h", "doubles", "triples", "hr", "rbi"):
+                x[k] = max(0, int(x.get(k) or 0))
+            x["h"] = min(x["h"], x["ab"])
+        if best["ab"] <= 0:
+            best["ab"] = 400
+        best["h"] = round(float(p["avg"]) * best["ab"])
+        best["hr"], best["rbi"] = int(p["hr"]), int(p["rbi"])
+    p["seasons"] = seasons
+    return True
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -341,8 +409,13 @@ def main():
 
     # Safety checks (audit fixes #7, #8)
     valid = []
-    skipped = {"malformed": 0, "too_long": 0, "name_in_notion": 0, "real_player": 0}
+    skipped = {"malformed": 0, "too_long": 0, "bad_seasons": 0, "name_in_notion": 0, "real_player": 0}
     for p in all_drafts:
+        if not repair_seasons(p):
+            log.warning(f"Skipping '{p['name']}': season lines or best-season stats missing")
+            skipped["bad_seasons"] += 1
+            continue
+
         try:
             post_text = format_post(p)
         except (KeyError, TypeError) as e:
@@ -371,7 +444,7 @@ def main():
 
     scored = run_critic(client, valid, approved)
     scored.sort(key=lambda p: p.get("score", 0), reverse=True)
-    top = scored[:TOP_N_TO_NOTION]
+    top = [p for p in scored if p.get("score", 0) >= MIN_SCORE_TO_NOTION][:TOP_N_TO_NOTION]
 
     log.info(f"Pushing top {len(top)} to Notion...")
     pushed, push_errors = 0, []
@@ -385,11 +458,17 @@ def main():
                 "era":              p["era"],
                 "career_war":       p["career_war"],
                 "best_season_year": p["best_season_year"],
-                "avg":              p["avg"],
-                "hr":               p["hr"],
-                "rbi":              p["rbi"],
+                "avg":              p.get("avg"),
+                "hr":               p.get("hr"),
+                "rbi":              p.get("rbi"),
+                "earned_run_avg":   p.get("earned_run_avg"),
+                "w":                p.get("w"),
+                "l":                p.get("l"),
+                "so":               p.get("so"),
+                "bb":               p.get("bb"),
                 "stat_note":        p["stat_note"],
                 "story":            p["story"],
+                "seasons":          p["seasons"],
                 "score":            p.get("score"),
                 "critic_note":      p.get("critic_note", ""),
             })

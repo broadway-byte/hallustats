@@ -255,6 +255,8 @@ def season_lines(player: dict) -> list:
     The best season is the player's real (generated) line; other seasons are
     built around it, seeded by name so a player's record never changes.
     """
+    if player.get("seasons"):
+        return _writer_seasons(player)
     rng = random.Random(seed_for(player, "seasons"))
     start = player.get("year_start") or 1925
     last = card_year(player) - 1
@@ -267,8 +269,12 @@ def season_lines(player: dict) -> list:
     for y in years:
         is_best = (y == best)
         if pitcher:
-            era_best = float(player.get("avg") or 4.0)
-            w_best, l_best = int(player.get("hr") or 6), int(player.get("rbi") or 6)
+            if player.get("earned_run_avg") is not None:
+                era_best = float(player["earned_run_avg"])
+                w_best, l_best = int(player.get("w") or 6), int(player.get("l") or 6)
+            else:  # drafted before pitchers had their own fields
+                era_best = float(player.get("avg") or 4.0)
+                w_best, l_best = int(player.get("hr") or 6), int(player.get("rbi") or 6)
             g = rng.randint(18, 40)
             ip = rng.randint(60, 190)
             if is_best:
@@ -300,6 +306,26 @@ def season_lines(player: dict) -> list:
             r = int(h * rng.uniform(0.35, 0.55))
             out.append(dict(year=y, club=club, g=g, ab=ab, r=r, h=h, d=d2, t=t3, hr=hr, rbi=rbi,
                             avg=(h / ab if ab else 0)))
+    return out
+
+
+def _writer_seasons(player: dict) -> list:
+    """The writer's own season lines, shown through the season before the card year."""
+    club = _club_abbr(player.get("team", ""))
+    pitcher = player.get("position") in PITCHERS
+    last = card_year(player) - 1
+    out = []
+    for x in sorted(player["seasons"], key=lambda x: x.get("year", 0)):
+        if x.get("year", 0) > last:
+            continue
+        if pitcher:
+            out.append(dict(year=x["year"], club=club, g=x.get("g", 0), ip=x.get("ip", 0), w=x.get("w", 0),
+                            l=x.get("l", 0), so=x.get("so", 0), bb=x.get("bb", 0), era=float(x.get("era", 0))))
+        else:
+            ab, h = x.get("ab", 0), x.get("h", 0)
+            out.append(dict(year=x["year"], club=club, g=x.get("g", 0), ab=ab, r=x.get("r", 0), h=h,
+                            d=x.get("doubles", 0), t=x.get("triples", 0), hr=x.get("hr", 0),
+                            rbi=x.get("rbi", 0), avg=(h / ab if ab else 0)))
     return out
 
 

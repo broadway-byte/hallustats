@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import logging
@@ -67,8 +68,9 @@ class NotionClient:
 
     @staticmethod
     def _rich_text(props, key):
+        # Join every piece: Notion splits text wherever formatting changes
         items = props.get(key, {}).get("rich_text", [])
-        return items[0]["text"]["content"] if items else ""
+        return "".join(i.get("plain_text") or i.get("text", {}).get("content", "") for i in items)
 
     @staticmethod
     def _select(props, key):
@@ -99,6 +101,15 @@ class NotionClient:
                 urls.append(f["external"]["url"])
         return urls
 
+    def _seasons(self, props):
+        raw = self._rich_text(props, "Seasons")
+        if not raw:
+            return []
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return []
+
     def _parse_player(self, page):
         p = page["properties"]
         return {
@@ -114,6 +125,11 @@ class NotionClient:
             "avg": self._number(p, "AVG"),
             "hr": self._number(p, "HR"),
             "rbi": self._number(p, "RBI"),
+            "earned_run_avg": self._number(p, "ERA"),
+            "w": self._number(p, "W"),
+            "l": self._number(p, "L"),
+            "so": self._number(p, "SO"),
+            "bb": self._number(p, "BB"),
             "stat_note": self._rich_text(p, "Stat Note"),
             "story": self._rich_text(p, "Story"),
             "card_image_urls": self._files(p, "Card Image"),
@@ -123,6 +139,7 @@ class NotionClient:
             "score": self._number(p, "Score"),
             "critic_note": self._rich_text(p, "Critic Note"),
             "card_option_urls": self._files(p, "Card Options"),
+            "seasons": self._seasons(p),
         }
 
     # ── public query methods ──────────────────────────────────────────────────
@@ -202,6 +219,12 @@ class NotionClient:
             "Story": rt(player.get("story", "")),
             "Critic Note": rt(player.get("critic_note", "")),
         }
+        # Season lines as compact JSON, split into Notion's 2,000-character text pieces
+        if player.get("seasons"):
+            blob = json.dumps(player["seasons"], separators=(",", ":"))
+            props["Seasons"] = {"rich_text": [
+                {"text": {"content": blob[i:i + 1900]}} for i in range(0, len(blob), 1900)
+            ]}
         # Optional select fields — omit rather than create bad options
         if player.get("position"):
             props["Position"] = {"select": {"name": player["position"]}}
@@ -215,6 +238,11 @@ class NotionClient:
             ("avg", "AVG"),
             ("hr", "HR"),
             ("rbi", "RBI"),
+            ("earned_run_avg", "ERA"),
+            ("w", "W"),
+            ("l", "L"),
+            ("so", "SO"),
+            ("bb", "BB"),
             ("score", "Score"),
         ]:
             if player.get(key) is not None:

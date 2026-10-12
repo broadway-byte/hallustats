@@ -14,6 +14,57 @@ NOTION_VERSION = "2022-06-28"
 NOTION_BASE = "https://api.notion.com/v1"
 
 
+# ── Season lines in Notion ────────────────────────────────────────────────────
+# One season per line, readable and editable by hand:
+#   1954 · G 97 · AB 332 · R 28 · H 70 · 2B 10 · 3B 1 · HR 1 · RBI 14
+#   1937 · G 34 · IP 188 · W 11 · L 13 · SO 79 · BB 61 · ERA 3.88
+
+_SEASON_KEYS = [("g", "G"), ("ab", "AB"), ("r", "R"), ("h", "H"), ("doubles", "2B"), ("triples", "3B"),
+                ("hr", "HR"), ("rbi", "RBI"), ("ip", "IP"), ("w", "W"), ("l", "L"), ("so", "SO"),
+                ("bb", "BB"), ("era", "ERA")]
+_LABEL_TO_KEY = {label: key for key, label in _SEASON_KEYS}
+
+
+def format_seasons(seasons: list) -> str:
+    lines = []
+    for x in sorted(seasons, key=lambda x: x.get("year", 0)):
+        parts = [str(x["year"])]
+        for key, label in _SEASON_KEYS:
+            if x.get(key) is not None:
+                v = x[key]
+                parts.append(f"{label} {v:.2f}" if key == "era" else f"{label} {int(v)}")
+        lines.append(" · ".join(parts))
+    return "\n".join(lines)
+
+
+def parse_seasons(raw: str) -> list:
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    if raw.startswith("["):                     # older rows stored JSON
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return []
+    out = []
+    for line in re.split(r"[\n|;]+", raw):
+        bits = [b.strip() for b in line.split("·")]
+        if not bits or not bits[0].strip().isdigit():
+            continue
+        row = {"year": int(bits[0])}
+        for b in bits[1:]:
+            label, _, val = b.partition(" ")
+            key = _LABEL_TO_KEY.get(label.strip().upper())
+            if not key:
+                continue
+            try:
+                row[key] = float(val) if key == "era" else int(float(val))
+            except ValueError:
+                pass
+        out.append(row)
+    return out
+
+
 class NotionClient:
     def __init__(self):
         self.token = os.environ["NOTION_API_KEY"]
@@ -102,13 +153,7 @@ class NotionClient:
         return urls
 
     def _seasons(self, props):
-        raw = self._rich_text(props, "Seasons")
-        if not raw:
-            return []
-        try:
-            return json.loads(raw)
-        except ValueError:
-            return []
+        return parse_seasons(self._rich_text(props, "Seasons"))
 
     def _parse_player(self, page):
         p = page["properties"]
@@ -219,9 +264,9 @@ class NotionClient:
             "Story": rt(player.get("story", "")),
             "Critic Note": rt(player.get("critic_note", "")),
         }
-        # Season lines as compact JSON, split into Notion's 2,000-character text pieces
+        # Season lines as readable text, split into Notion's 2,000-character text pieces
         if player.get("seasons"):
-            blob = json.dumps(player["seasons"], separators=(",", ":"))
+            blob = format_seasons(player["seasons"])
             props["Seasons"] = {"rich_text": [
                 {"text": {"content": blob[i:i + 1900]}} for i in range(0, len(blob), 1900)
             ]}

@@ -6,6 +6,7 @@ Notion ignores add-property requests for properties that already exist.
 """
 
 import os
+import sys
 import requests
 from dotenv import load_dotenv
 
@@ -28,7 +29,7 @@ def main():
     r = requests.get(f"{NOTION_BASE}/databases/{db_id}", headers=headers, timeout=15)
     if not r.ok:
         print(f"Error reaching database: {r.status_code} {r.text}")
-        return
+        sys.exit(1)
 
     existing = set(r.json().get("properties", {}).keys())
     print(f"Existing properties: {sorted(existing)}")
@@ -91,6 +92,7 @@ def main():
         print("Done — database properties updated.")
     else:
         print(f"Error: {r.status_code} {r.text}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

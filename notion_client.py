@@ -155,10 +155,16 @@ class NotionClient:
         return self._parse_player(pages[0])
 
     def get_approved_without_card(self):
-        """Approved players that still need card images generated."""
+        """Approved players that have never had card images generated.
+
+        Skips anyone with Card Options already attached, so a player waiting for you
+        to pick a front is not redrawn (and re-billed) every night.
+        To redraw a player, clear their Card Options.
+        """
         pages = self._query_db(filter_obj={"and": [
             {"property": "Status", "select": {"equals": "Approved"}},
             {"property": "Card Image", "files": {"is_empty": True}},
+            {"property": "Card Options", "files": {"is_empty": True}},
         ]})
         return [self._parse_player(p) for p in pages]
 

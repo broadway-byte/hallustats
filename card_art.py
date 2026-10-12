@@ -287,7 +287,8 @@ def season_lines(player: dict) -> list:
             g = rng.randint(60, 140)
             ab = int(g * rng.uniform(3.0, 3.8))
             if is_best:
-                ab = max(ab, 420)
+                g = max(g, 120)
+                ab = max(ab, int(g * 3.5))
                 avg_v, hr, rbi = avg_best, hr_best, rbi_best
             else:
                 avg_v = max(0.140, min(avg_best - 0.002, avg_best - rng.uniform(0.008, 0.045)))
@@ -545,3 +546,104 @@ def render_back(player: dict, template: Image.Image = None, cartoon: Image.Image
         img = print_text(img, (CARD_W // 2, CARD_H - 90 - (len(b["footer"]) - 1 - j) * 30), txt,
                          load_font(20, bold=(j == 0 and len(b["footer"]) > 1)), ink, next(si), anchor="mm")
     return img
+
+
+# ── Image-generated backs ─────────────────────────────────────────────────────
+# The whole back is drawn by the image model, from exact text supplied here,
+# so it shares the fronts' printing, stock and wear. Text is kept short and
+# tables are capped so the model has less to get wrong; you check every back
+# before it posts.
+
+BACK_LOOK = {
+    "tobacco":   "the back of a 1909-1911 T206 tobacco card: a single advertisement in dark blue ink on thin cream "
+                 "cardboard, ornate period display type, a thin decorative frame, no player information",
+    "goudey":    "the back of a 1933 Goudey gum card: dark green ink on thick cream cardboard, the player's name and "
+                 "a short biography set in a classic serif, a small gum advertisement at the foot",
+    "bowman":    "the back of a 1948 Bowman gum card: black and red ink on thin off-white cardboard, card number, name, "
+                 "short vital statistics and a biography in plain period type",
+    "topps52":   "the back of a 1950s Topps card: red and black ink on gray cardboard, a name box, vital statistics, "
+                 "a short biography, a one-panel cartoon, and a small statistics table",
+    "topps66":   "the back of a 1960s Topps card: black and orange ink on gray cardboard, a name header, vital "
+                 "statistics, a short biography, a one-panel cartoon, and a year-by-year statistics table",
+    "topps76":   "the back of a 1970s Topps card: green and black ink on gray cardboard, a name header, vital "
+                 "statistics, a short biography, a one-panel cartoon, and a year-by-year statistics table",
+    "upperdeck": "the back of a late-1980s premium card: full color on white glossy cardboard, a small color "
+                 "photograph of the player in one corner, a name banner, a short biography and a statistics table",
+    "chrome":    "the back of a late-1990s chrome card: full color on bright white premium stock, a small color "
+                 "photograph of the player, a name banner, a short biography and a statistics table",
+}
+
+MAX_BACK_ROWS = 8
+
+
+def _table_lines(player: dict) -> list:
+    pitcher = player.get("position") in PITCHERS
+    rows = season_lines(player)
+    full = card_year(player) >= FULL_CAREER_STATS_FROM
+    rows = rows[-MAX_BACK_ROWS:] if full else rows[-1:]
+    tot = lifetime(season_lines(player), pitcher)
+    if pitcher:
+        head = "YR  CLUB  G  IP  W  L  SO  BB  ERA"
+        body = [f"{str(r['year'])[-2:]}  {r['club']}  {r['g']}  {r['ip']}  {r['w']}  {r['l']}  "
+                f"{r['so']}  {r['bb']}  {r['era']:.2f}" for r in rows]
+        totl = (f"TOTALS  {tot['g']}  {tot['ip']}  {tot['w']}  {tot['l']}  {tot['so']}  {tot['bb']}  "
+                f"{tot['era']:.2f}") if tot else ""
+        title = "MINOR LEAGUE PITCHING RECORD"
+    else:
+        head = "YR  CLUB  G  AB  R  H  2B  3B  HR  RBI  AVG"
+        body = [f"{str(r['year'])[-2:]}  {r['club']}  {r['g']}  {r['ab']}  {r['r']}  {r['h']}  {r['d']}  "
+                f"{r['t']}  {r['hr']}  {r['rbi']}  {_fmt_avg(r['avg'])}" for r in rows]
+        totl = (f"TOTALS  {tot['g']}  {tot['ab']}  {tot['r']}  {tot['h']}  {tot['d']}  {tot['t']}  "
+                f"{tot['hr']}  {tot['rbi']}  {_fmt_avg(tot['avg'])}") if tot else ""
+        title = "MINOR LEAGUE BATTING RECORD"
+    return [title, head] + body + ([totl] if totl else [])
+
+
+def back_prompt(player: dict) -> str:
+    """Full image prompt for a card back, with every word spelled out exactly."""
+    era = era_for(player)
+    b = BACK_STYLES[era]
+    year = card_year(player)
+    no = seed_for(player, "no") % b.get("series_size", 300) + 1
+    name = player.get("name", "")
+    team = player.get("team", "")
+    pos = player.get("position", "")
+    write_up = " ".join(x for x in ((player.get("stat_note") or "").strip(),
+                                    (player.get("story") or "").strip()) if x)
+
+    text = []
+    if b["layout"] == "ad":
+        text += b["ad_lines"] + [b["tagline"]] + b["footer"]
+    else:
+        if b.get("numbered"):
+            text.append(f"No. {no}")
+        text += [name.upper(), f"{pos}  ·  {team.upper()}"]
+        if b["layout"] == "stats" or era == "bowman":
+            text.append(vitals(player))
+        if write_up:
+            text.append(write_up)
+        if b["layout"] == "stats":
+            text += _table_lines(player)
+        if b.get("series_line"):
+            text.append(b["series_line"])
+        text += [line.format(year=year) for line in b["footer"]]
+
+    extras = []
+    if b["layout"] == "stats" and CARTOON_YEARS[0] <= year <= CARTOON_YEARS[1]:
+        extras.append(f"Include a small one-panel cartoon in the card's ink colors illustrating: "
+                      f"{(player.get('stat_note') or 'a baseball oddity').rstrip('.')}. The cartoon has no words of its own.")
+    if year in BACK_PHOTO_YEARS:
+        tone = "black-and-white" if year in BW_BACK_PHOTO_YEARS else "color"
+        t = TEAM_BY_NAME.get(team)
+        kit = f" in a {t['kit']['colors'][0]} and {t['kit']['colors'][1]} uniform" if t else ""
+        extras.append(f"Include a small {tone} head-and-shoulders photo of the player{kit}.")
+
+    lines = "\n".join(f"- {t}" for t in text)
+    return (
+        f"Vintage baseball card, reverse side only, printed in {year}. It looks like {BACK_LOOK[era]}. "
+        f"Flat, straight-on scan with the card filling the frame, aspect ratio roughly 3:4 (portrait). "
+        f"Authentic age for a card printed in {year}: paper grain, slight ink spread, faint stains, "
+        f"soft corner wear. {' '.join(extras)} "
+        f"Print exactly this text, spelled exactly as written, and no other words, numbers or logos:\n"
+        f"{lines}"
+    )

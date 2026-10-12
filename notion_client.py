@@ -247,12 +247,14 @@ class NotionClient:
             "properties": {"Status": {"select": {"name": "Approved"}}}
         })
 
-    def attach_card_options(self, page_id: str, urls: list):
-        """Write external URLs into the Card Options field."""
+    def attach_card_options(self, page_id: str, urls: list, back_url: str = None):
+        """Write front options (and the back, last) into the Card Options field."""
         files = [
             {"type": "external", "name": f"Option {i + 1}", "external": {"url": url}}
             for i, url in enumerate(urls)
         ]
+        if back_url:
+            files.append({"type": "external", "name": "Back", "external": {"url": back_url}})
         self._patch(f"/pages/{page_id}", {
             "properties": {"Card Options": {"files": files}}
         })

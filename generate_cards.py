@@ -6,7 +6,7 @@ Workflow:
   1. Fetch all Approved players with no Card Image set.
   2. For each player, call gpt-image-2 three times (portrait in the team's uniform, era card art).
   3. Print the era's front caption into the card in code (card_art.py).
-  4. Build the back on the era's generated cardstock: period-correct layout, Hallu branding,
+  4. Generate the back as an image from exact text: period-correct layout, Hallu branding,
      stats, cartoon (1953-82) and back photo (1971, 1989 on).
   5. Save to cards/<slug>_<era>_opt<n>.png and cards/<slug>_<era>_back.png.
   5. Write the GitHub raw URLs to Notion Card Options.
@@ -29,8 +29,7 @@ import requests
 from dotenv import load_dotenv
 from PIL import Image
 
-from card_art import (CARD_H, CARD_W, CARTOON_YEARS, card_year, cartoon_prompt, era_for,
-                      front_layout_prompt, load_back_template, render_back, stamp_front)
+from card_art import CARD_H, CARD_W, back_prompt, era_for, front_layout_prompt, stamp_front
 from config import CARDS_DIR, ERA_STYLES, OPENAI_IMAGE_MODEL, WORDMARK_STYLES
 from teams import TEAM_BY_NAME
 from notion_client import NotionClient
@@ -152,13 +151,10 @@ def main():
         saved_paths = []
         raw_urls    = []
 
-        first_art = None
         for opt in range(OPTIONS):
             try:
                 prompt   = build_image_prompt(player, opt)
                 art      = fetch_image(oai, prompt)
-                if first_art is None:
-                    first_art = art.copy()   # unlettered art, reused for back photos
                 art      = stamp_front(art, player)
                 filename = f"{slugify(name)}_{era}_opt{opt + 1}.png"
                 filepath = Path(CARDS_DIR) / filename
@@ -174,28 +170,20 @@ def main():
             except Exception as e:
                 log.error(f"  ✗ Option {opt + 1}: {e}")
 
-        # One back per player: era cardstock (generated once per era) + printed text
+        # One back per player, drawn by the image model from exact text
+        back_url = None
         try:
-            template = load_back_template(era, fetch=lambda p: fetch_image(oai, p))
-            cartoon = None
-            if CARTOON_YEARS[0] <= card_year(player) <= CARTOON_YEARS[1] and player.get("stat_note"):
-                try:
-                    cartoon = fetch_image(oai, cartoon_prompt(player, era), size="1024x1024")
-                except Exception as e:
-                    log.warning(f"  Cartoon skipped: {e}")
-            back = render_back(player, template=template, cartoon=cartoon, photo=first_art)
+            back = fetch_image(oai, back_prompt(player))
             back_name = f"{slugify(name)}_{era}_back.png"
             back.save(Path(CARDS_DIR) / back_name, "PNG")
             log.info(f"  ✓ Back: {back_name}")
             back_url = github_raw_url(back_name)
-            if back_url:
-                log.info(f"  Back URL: {back_url}")
         except Exception as e:
             log.error(f"  ✗ Back: {e}")
 
         if raw_urls:
             try:
-                notion.attach_card_options(player["page_id"], raw_urls)
+                notion.attach_card_options(player["page_id"], raw_urls, back_url=back_url)
                 log.info(f"  Attached {len(raw_urls)} Card Options to Notion page")
             except Exception as e:
                 log.error(f"  Failed to attach Card Options: {e}")

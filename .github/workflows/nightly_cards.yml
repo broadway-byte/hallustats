@@ -1,0 +1,46 @@
+name: Nightly Cards
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # 5:00 AM UTC = 1:00 AM ET (low-traffic window)
+  workflow_dispatch:
+
+permissions:
+  contents: write   # lets the job commit generated cards back to the repo
+
+jobs:
+  cards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate card images
+        env:
+          OPENAI_API_KEY:      ${{ secrets.OPENAI_API_KEY }}
+          NOTION_API_KEY:      ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID:  ${{ secrets.NOTION_DATABASE_ID }}
+          GITHUB_REPO:         ${{ github.repository }}
+          GITHUB_BRANCH:       ${{ github.ref_name }}
+        run: python generate_cards.py
+
+      - name: Commit and push cards
+        run: |
+          git config user.name  "HalluStats Bot"
+          git config user.email "bot@hallustats.invalid"
+          git add cards/
+          if git diff --staged --quiet; then
+            echo "No new cards to commit."
+          else
+            git commit -m "Generated card images $(date -u +%Y-%m-%d)"
+            git push
+          fi

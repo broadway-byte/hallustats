@@ -1,0 +1,6 @@
+.env
+*.pyc
+__pycache__/
+lahman_names.json
+*.log
+.DS_Store

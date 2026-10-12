@@ -168,7 +168,11 @@ Rules for stats:
   Seasons should look like a real minor-league career: partial first and last years, an off year, an injury year if the story mentions one.
 - Every number in stat_note and story must agree with the season lines.
 
-Rules for copy (posts are capped at 280 characters, so these limits are hard):
+Rules for copy (posts are capped at 280 characters; any entry over is thrown away):
+- stat_note + story TOGETHER must be 140 characters or fewer. Count them.
+- Example at the right length (126 characters total):
+  stat_note: "Grounded into 34 double plays in 1936." (38)
+  story: "The Waukegan News-Sun called his swing purposeful. He was traded in May for a used tarp." (88)
 - stat_note: max {MAX_STAT_NOTE_CHARS} characters, one specific deadpan career fact
 - story: max {MAX_STORY_CHARS} characters, the deadpan closing line, built on one concrete detail
 - Avoid the "nobody noticed him" shape and do not repeat a joke shape within the batch
@@ -401,11 +405,11 @@ SHORTEN_TOOL = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "name":      {"type": "string"},
+                        "id":        {"type": "integer"},
                         "stat_note": {"type": "string"},
                         "story":     {"type": "string"},
                     },
-                    "required": ["name", "stat_note", "story"],
+                    "required": ["id", "stat_note", "story"],
                 },
             }
         },
@@ -424,10 +428,11 @@ def shorten_drafts(client: anthropic.Anthropic, drafts: list) -> None:
     if not drafts:
         return
     lines = ""
-    for p in drafts:
+    for i, p in enumerate(drafts):
         budget = copy_budget(p)
-        lines += (f"- {p['name']} | budget {budget} chars total "
-                  f"(stat_note max {min(MAX_STAT_NOTE_CHARS, budget // 3)}) | "
+        now = len(p["stat_note"]) + len(p["story"])
+        lines += (f"id {i} | {p['name']} | currently {now} chars, must be {budget} or fewer "
+                  f"(stat_note at most {min(MAX_STAT_NOTE_CHARS, budget // 3)}) | "
                   f"stat_note: {p['stat_note']!r} | story: {p['story']!r}\n")
     response = client.messages.create(
         model=CLAUDE_DRAFT_MODEL,
@@ -436,7 +441,8 @@ def shorten_drafts(client: anthropic.Anthropic, drafts: list) -> None:
         tools=[SHORTEN_TOOL],
         tool_choice={"type": "tool", "name": "submit_shortened"},
         messages=[{"role": "user", "content": f"""These entries are too long for a 280-character post.
-Rewrite each stat_note and story so their combined length fits the budget shown. Count characters.
+Rewrite each stat_note and story so their combined length is at or under the budget shown.
+Count characters, spaces included. Return every id.
 Keep the same joke, the same concrete detail and every number exactly as it is. Cut words, not facts.
 The story must still end flat.
 
@@ -444,11 +450,11 @@ The story must still end flat.
     )
     for block in response.content:
         if block.type == "tool_use" and block.name == "submit_shortened":
-            by_name = {x["name"]: x for x in block.input["players"]}
-            for p in drafts:
-                x = by_name.get(p["name"])
-                if x:
-                    p["stat_note"], p["story"] = x["stat_note"].strip(), x["story"].strip()
+            for x in block.input["players"]:
+                i = x.get("id")
+                if isinstance(i, int) and 0 <= i < len(drafts):
+                    drafts[i]["stat_note"] = x["stat_note"].strip()
+                    drafts[i]["story"] = x["story"].strip()
             return
     log.warning("Shortening pass returned nothing")
 
@@ -509,10 +515,14 @@ def main():
     # Second chance for over-length drafts: one tightening call, then re-measure
     if too_long:
         log.info(f"Tightening {len(too_long)} over-length drafts...")
-        try:
-            shorten_drafts(client, too_long)
-        except Exception as e:
-            log.error(f"Shortening pass failed: {e}")
+        for attempt in range(2):
+            still = [p for p in too_long if len(format_post(p)) > MAX_POST_CHARS]
+            if not still:
+                break
+            try:
+                shorten_drafts(client, still)
+            except Exception as e:
+                print(f"::warning::Shortening pass {attempt + 1} failed: {str(e)[:300]}")
         for p in too_long:
             n = len(format_post(p))
             if n > MAX_POST_CHARS:

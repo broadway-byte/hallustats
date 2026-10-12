@@ -65,6 +65,14 @@ def parse_seasons(raw: str) -> list:
     return out
 
 
+# Review flow in Notion:
+#   Pending -> Copy Approved -> (cards drawn) -> Cards Ready -> Approved -> Posting -> Posted
+#   Cards Ready -> Redraw Cards -> (cards drawn again) -> Cards Ready
+#   Rejected at either gate.
+STATUSES = ["Pending", "Copy Approved", "Cards Ready", "Redraw Cards", "Approved", "Posting", "Posted", "Rejected"]
+COPY_APPROVED_STATUSES = ("Copy Approved", "Cards Ready", "Redraw Cards", "Approved", "Posting", "Posted")
+
+
 class NotionClient:
     def __init__(self):
         self.token = os.environ["NOTION_API_KEY"]
@@ -190,11 +198,10 @@ class NotionClient:
     # ── public query methods ──────────────────────────────────────────────────
 
     def get_roster(self):
-        """All Approved, Posted, and Rejected players — used as few-shot examples."""
+        """Every player whose copy you have judged — used as few-shot examples."""
+        judged = list(COPY_APPROVED_STATUSES) + ["Rejected"]
         pages = self._query_db(filter_obj={"or": [
-            {"property": "Status", "select": {"equals": "Approved"}},
-            {"property": "Status", "select": {"equals": "Posted"}},
-            {"property": "Status", "select": {"equals": "Rejected"}},
+            {"property": "Status", "select": {"equals": st}} for st in judged
         ]})
         return [self._parse_player(p) for p in pages]
 
@@ -216,19 +223,16 @@ class NotionClient:
             return None
         return self._parse_player(pages[0])
 
-    def get_approved_without_card(self):
-        """Approved players that have never had card images generated.
-
-        Skips anyone with Card Options already attached, so a player waiting for you
-        to pick a front is not redrawn (and re-billed) every night.
-        To redraw a player, clear their Card Options.
-        """
-        pages = self._query_db(filter_obj={"and": [
-            {"property": "Status", "select": {"equals": "Approved"}},
-            {"property": "Card Image", "files": {"is_empty": True}},
-            {"property": "Card Options", "files": {"is_empty": True}},
+    def get_players_needing_cards(self):
+        """Players whose copy you approved, or whose art you sent back for a redraw."""
+        pages = self._query_db(filter_obj={"or": [
+            {"property": "Status", "select": {"equals": "Copy Approved"}},
+            {"property": "Status", "select": {"equals": "Redraw Cards"}},
         ]})
         return [self._parse_player(p) for p in pages]
+
+    def set_status(self, page_id: str, status: str):
+        self._patch(f"/pages/{page_id}", {"properties": {"Status": {"select": {"name": status}}}})
 
     def get_queue_count(self):
         """Count of approved players with card images ready to post."""

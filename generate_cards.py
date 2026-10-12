@@ -3,7 +3,7 @@
 and attach the raw GitHub URLs to the player's Card Options field in Notion.
 
 Workflow:
-  1. Fetch all Approved players with no Card Image set.
+  1. Fetch players marked Copy Approved (or Redraw Cards) in Notion.
   2. For each player, call gpt-image-2 three times (portrait in the team's uniform, era card art).
   3. Print the era's front caption into the card in code (card_art.py).
   4. Generate the back as an image from exact text: period-correct layout, Hallu branding,
@@ -129,8 +129,8 @@ def main():
     notion = NotionClient()
     Path(CARDS_DIR).mkdir(exist_ok=True)
 
-    players = notion.get_approved_without_card()
-    log.info(f"{len(players)} approved players need card images")
+    players = notion.get_players_needing_cards()
+    log.info(f"{len(players)} players need cards (Copy Approved or Redraw Cards)")
 
     for player in players:
         name = player["name"]
@@ -184,6 +184,7 @@ def main():
         if raw_urls:
             try:
                 notion.attach_card_options(player["page_id"], raw_urls, back_url=back_url)
+                notion.set_status(player["page_id"], "Cards Ready")   # now waiting on your art review
                 log.info(f"  Attached {len(raw_urls)} Card Options to Notion page")
             except Exception as e:
                 log.error(f"  Failed to attach Card Options: {e}")

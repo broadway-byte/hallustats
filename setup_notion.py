@@ -74,11 +74,14 @@ def main():
             for pos in ["1B", "2B", "3B", "SS", "C", "LF", "CF", "RF", "SP", "RP"]
         ]}},
         "Status": {"select": {"options": [
-            {"name": "Pending",  "color": "yellow"},
-            {"name": "Approved", "color": "green"},
-            {"name": "Rejected", "color": "red"},
-            {"name": "Posting",  "color": "blue"},
-            {"name": "Posted",   "color": "gray"},
+            {"name": "Pending",       "color": "yellow"},
+            {"name": "Copy Approved", "color": "orange"},
+            {"name": "Cards Ready",   "color": "purple"},
+            {"name": "Redraw Cards",  "color": "pink"},
+            {"name": "Approved",      "color": "green"},
+            {"name": "Posting",       "color": "blue"},
+            {"name": "Posted",        "color": "gray"},
+            {"name": "Rejected",      "color": "red"},
         ]}},
     }
 

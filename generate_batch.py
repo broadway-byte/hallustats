@@ -33,7 +33,7 @@ from config import (
     MAX_STORY_CHARS,
     MAX_STAT_NOTE_CHARS,
 )
-from notion_client import NotionClient
+from notion_client import COPY_APPROVED_STATUSES, NotionClient
 from teams import TEAM_NAMES, TEAM_BY_NAME
 
 load_dotenv()
@@ -106,7 +106,7 @@ def assign_slots(n: int) -> list:
 # ── Prompt construction ───────────────────────────────────────────────────────
 
 def build_prompts(roster: list, existing_names: set, slots: list) -> tuple[str, str]:
-    approved = [p for p in roster if p["status"] in ("Approved", "Posted")]
+    approved = [p for p in roster if p["status"] in COPY_APPROVED_STATUSES]
     rejected = [p for p in roster if p["status"] == "Rejected"]
 
     approved_block = ""
@@ -471,7 +471,7 @@ def main():
     existing_names = notion.get_all_existing_names()
     log.info(f"{len(roster)} roster players, {len(existing_names)} existing names")
 
-    approved = [p for p in roster if p["status"] in ("Approved", "Posted")]
+    approved = [p for p in roster if p["status"] in COPY_APPROVED_STATUSES]
     slots = assign_slots(BATCH_CANDIDATES)
     system, user = build_prompts(roster, existing_names, slots)
 

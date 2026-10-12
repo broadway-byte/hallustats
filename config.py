@@ -1,7 +1,7 @@
 import os
 
-CLAUDE_DRAFT_MODEL = os.getenv("CLAUDE_DRAFT_MODEL", "claude-sonnet-4-6")
-CLAUDE_CRITIC_MODEL = os.getenv("CLAUDE_CRITIC_MODEL", "claude-opus-4-8")
+CLAUDE_DRAFT_MODEL = os.getenv("CLAUDE_DRAFT_MODEL") or "claude-sonnet-4-6"   # empty secret falls back
+CLAUDE_CRITIC_MODEL = os.getenv("CLAUDE_CRITIC_MODEL") or "claude-opus-4-8"
 OPENAI_IMAGE_MODEL = "gpt-image-2"
 
 # Era definitions. Weight = slots per 25-candidate batch (must sum to 25).

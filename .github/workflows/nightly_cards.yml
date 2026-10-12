@@ -31,7 +31,14 @@ jobs:
           NOTION_DATABASE_ID:  ${{ secrets.NOTION_DATABASE_ID }}
           GITHUB_REPO:         ${{ github.repository }}
           GITHUB_BRANCH:       ${{ github.ref_name }}
-        run: python generate_cards.py
+        run: |
+          set -o pipefail
+          python generate_cards.py 2>&1 | tee run.log
+
+      - name: Show error
+        if: failure()
+        run: |
+          echo "::error::$(tail -c 1500 run.log 2>/dev/null | tr '\n' ' ')"
 
       - name: Commit and push cards
         run: |

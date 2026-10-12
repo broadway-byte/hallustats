@@ -29,4 +29,11 @@ jobs:
           NOTION_DATABASE_ID:  ${{ secrets.NOTION_DATABASE_ID }}
           CLAUDE_DRAFT_MODEL:  ${{ secrets.CLAUDE_DRAFT_MODEL }}   # optional override
           CLAUDE_CRITIC_MODEL: ${{ secrets.CLAUDE_CRITIC_MODEL }}  # optional override
-        run: python generate_batch.py
+        run: |
+          set -o pipefail
+          python generate_batch.py 2>&1 | tee run.log
+
+      - name: Show error
+        if: failure()
+        run: |
+          echo "::error::$(tail -c 1500 run.log 2>/dev/null | tr '\n' ' ')"

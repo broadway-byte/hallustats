@@ -44,7 +44,7 @@ def main():
         "Card Image":    {"files": {}},
         "Post Date":     {"date": {}},
         "Seasons":       {"rich_text": {}},
-        "ERA":           {"number": {"format": "number"}},
+        "Pitching ERA":  {"number": {"format": "number"}},
         "W":             {"number": {"format": "number"}},
         "L":             {"number": {"format": "number"}},
         "SO":            {"number": {"format": "number"}},

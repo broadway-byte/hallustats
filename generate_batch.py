@@ -388,6 +388,71 @@ def repair_seasons(p: dict) -> bool:
     return True
 
 
+# ── Tightening pass ───────────────────────────────────────────────────────────
+
+SHORTEN_TOOL = {
+    "name": "submit_shortened",
+    "description": "Submit the shortened copy for each player.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "players": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name":      {"type": "string"},
+                        "stat_note": {"type": "string"},
+                        "story":     {"type": "string"},
+                    },
+                    "required": ["name", "stat_note", "story"],
+                },
+            }
+        },
+        "required": ["players"],
+    },
+}
+
+
+def copy_budget(p: dict) -> int:
+    """Characters left for stat_note + story once the rest of the post is laid out."""
+    return MAX_POST_CHARS - len(format_post(dict(p, stat_note="", story="")))
+
+
+def shorten_drafts(client: anthropic.Anthropic, drafts: list) -> None:
+    """Send over-length drafts back to the writer with an exact budget; edits in place."""
+    if not drafts:
+        return
+    lines = ""
+    for p in drafts:
+        budget = copy_budget(p)
+        lines += (f"- {p['name']} | budget {budget} chars total "
+                  f"(stat_note max {min(MAX_STAT_NOTE_CHARS, budget // 3)}) | "
+                  f"stat_note: {p['stat_note']!r} | story: {p['story']!r}\n")
+    response = client.messages.create(
+        model=CLAUDE_DRAFT_MODEL,
+        max_tokens=6000,
+        system=VOICE_RULES,
+        tools=[SHORTEN_TOOL],
+        tool_choice={"type": "tool", "name": "submit_shortened"},
+        messages=[{"role": "user", "content": f"""These entries are too long for a 280-character post.
+Rewrite each stat_note and story so their combined length fits the budget shown. Count characters.
+Keep the same joke, the same concrete detail and every number exactly as it is. Cut words, not facts.
+The story must still end flat.
+
+{lines}"""}],
+    )
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "submit_shortened":
+            by_name = {x["name"]: x for x in block.input["players"]}
+            for p in drafts:
+                x = by_name.get(p["name"])
+                if x:
+                    p["stat_note"], p["story"] = x["stat_note"].strip(), x["story"].strip()
+            return
+    log.warning("Shortening pass returned nothing")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -409,6 +474,7 @@ def main():
 
     # Safety checks (audit fixes #7, #8)
     valid = []
+    over, too_long = [], []
     skipped = {"malformed": 0, "too_long": 0, "bad_seasons": 0, "name_in_notion": 0, "real_player": 0}
     for p in all_drafts:
         if not repair_seasons(p):
@@ -424,8 +490,8 @@ def main():
             continue
 
         if len(post_text) > MAX_POST_CHARS:
-            log.warning(f"Skipping '{p['name']}': post too long ({len(post_text)} chars)")
-            skipped["too_long"] += 1
+            over.append(len(post_text) - MAX_POST_CHARS)
+            too_long.append(p)
             continue
 
         if p["name"].lower() in existing_names:
@@ -439,6 +505,26 @@ def main():
             continue
 
         valid.append(p)
+
+    # Second chance for over-length drafts: one tightening call, then re-measure
+    if too_long:
+        log.info(f"Tightening {len(too_long)} over-length drafts...")
+        try:
+            shorten_drafts(client, too_long)
+        except Exception as e:
+            log.error(f"Shortening pass failed: {e}")
+        for p in too_long:
+            n = len(format_post(p))
+            if n > MAX_POST_CHARS:
+                log.warning(f"Skipping '{p['name']}': still too long after tightening ({n} chars)")
+                skipped["too_long"] += 1
+            elif p["name"].lower() in existing_names or name_matches_real_player(p["name"], lahman_names):
+                skipped["name_in_notion"] += 1
+            else:
+                valid.append(p)
+    if over:
+        print(f"::notice::{len(over)} drafts were over 280 on the first pass, "
+              f"by {min(over)}-{max(over)} chars (median {sorted(over)[len(over) // 2]})")
 
     log.info(f"{len(valid)} valid drafts after safety checks")
 

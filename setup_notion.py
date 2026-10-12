@@ -28,7 +28,7 @@ def main():
     # Verify the database is accessible first
     r = requests.get(f"{NOTION_BASE}/databases/{db_id}", headers=headers, timeout=15)
     if not r.ok:
-        print(f"Error reaching database: {r.status_code} {r.text}")
+        print(f"::error::Error reaching database: {r.status_code} {r.text[:300]}")
         sys.exit(1)
 
     existing = set(r.json().get("properties", {}).keys())
@@ -91,7 +91,7 @@ def main():
     if r.ok:
         print("Done — database properties updated.")
     else:
-        print(f"Error: {r.status_code} {r.text}")
+        print(f"::error::Error: {r.status_code} {r.text[:300]}")
         sys.exit(1)
 
 

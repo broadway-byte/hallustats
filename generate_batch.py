@@ -341,23 +341,28 @@ def main():
 
     # Safety checks (audit fixes #7, #8)
     valid = []
+    skipped = {"malformed": 0, "too_long": 0, "name_in_notion": 0, "real_player": 0}
     for p in all_drafts:
         try:
             post_text = format_post(p)
         except (KeyError, TypeError) as e:
             log.warning(f"Skipping malformed draft '{p.get('name', '?')}': {e}")
+            skipped["malformed"] += 1
             continue
 
         if len(post_text) > MAX_POST_CHARS:
             log.warning(f"Skipping '{p['name']}': post too long ({len(post_text)} chars)")
+            skipped["too_long"] += 1
             continue
 
         if p["name"].lower() in existing_names:
             log.warning(f"Skipping '{p['name']}': name already in Notion")
+            skipped["name_in_notion"] += 1
             continue
 
         if name_matches_real_player(p["name"], lahman_names):
             log.warning(f"Skipping '{p['name']}': matches real player in Lahman DB")
+            skipped["real_player"] += 1
             continue
 
         valid.append(p)
@@ -369,6 +374,7 @@ def main():
     top = scored[:TOP_N_TO_NOTION]
 
     log.info(f"Pushing top {len(top)} to Notion...")
+    pushed, push_errors = 0, []
     for p in top:
         try:
             page_id = notion.push_candidate({
@@ -388,8 +394,16 @@ def main():
                 "critic_note":      p.get("critic_note", ""),
             })
             log.info(f"  ✓ {p['name']}  score={p.get('score', '?')}  {page_id[:8]}…")
+            pushed += 1
         except Exception as e:
             log.error(f"  ✗ {p['name']}: {e}")
+            push_errors.append(f"{p['name']}: {str(e)[:150]}")
+
+    # One-line summary, shown on the workflow run page
+    print(f"::notice::drafts={len(all_drafts)} skipped={skipped} valid={len(valid)} "
+          f"scored={len(scored)} pushed={pushed}")
+    for err in push_errors[:3]:
+        print(f"::warning::Notion push failed: {err}")
 
     log.info("Batch complete.")
 

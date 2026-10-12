@@ -40,6 +40,8 @@ def main():
         "Score":         {"number": {"format": "number"}},
         "Critic Note":   {"rich_text": {}},
         "Card Options":  {"files": {}},
+        "Card Image":    {"files": {}},
+        "Post Date":     {"date": {}},
         # Core fields — add if missing
         "Team":              {"rich_text": {}},
         "Years":             {"rich_text": {}},

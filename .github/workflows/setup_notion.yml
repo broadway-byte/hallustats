@@ -1,0 +1,27 @@
+name: Setup Notion
+
+# Run once (Actions -> Setup Notion -> Run workflow) after pointing NOTION_DATABASE_ID
+# at a new, empty database. Adds every column the pipeline needs; safe to re-run.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Add database columns
+        env:
+          NOTION_API_KEY:     ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+        run: python setup_notion.py

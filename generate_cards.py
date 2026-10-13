@@ -68,6 +68,39 @@ def build_image_prompt(player: dict, option_idx: int) -> str:
     return front_prompt(player, option_idx, uniform=uniform_text(player.get("team", ""), era_for(player)))
 
 
+# ── Resilient image calls ─────────────────────────────────────────────────────
+
+IMAGE_PAUSE = 13          # seconds between image calls, to stay under per-minute limits
+RETRY_WAITS = (30, 60, 90)
+
+
+def fetch_with_retry(client, prompt: str, label: str):
+    """Image call that waits out rate limits and server hiccups; reports the final error."""
+    last = None
+    for attempt, wait in enumerate((0,) + RETRY_WAITS):
+        if wait:
+            log.warning(f"  {label}: retrying in {wait}s ({last})")
+            time.sleep(wait)
+        try:
+            img = fetch_image(client, prompt)
+            time.sleep(IMAGE_PAUSE)
+            return img
+        except Exception as e:
+            last = f"{type(e).__name__}: {str(e)[:200]}"
+            status = getattr(e, "status_code", None)
+            retryable = status in (429, 500, 502, 503, 504) or "rate" in str(e).lower() or "timeout" in str(e).lower()
+            if not retryable:
+                break
+    print(f"::warning::{label} failed: {last}")
+    return None
+
+
+def clear_old_cards(slug: str):
+    """Remove a player's previous images so a failed redraw never leaves stale art behind."""
+    for f in Path(CARDS_DIR).glob(f"{slug}_*.png"):
+        f.unlink()
+
+
 # ── Player look (for players written before the writer produced one) ─────────
 
 LOOK_TOOL = {
@@ -125,7 +158,7 @@ def publish(paths: list, name: str) -> bool:
         return True
     git = ["git", "-c", "user.name=HalluStats Bot", "-c", "user.email=bot@hallustats.invalid"]
     try:
-        subprocess.run(git + ["add", *paths], check=True)
+        subprocess.run(git + ["add", "-A", "--", *paths], check=True)
         subprocess.run(git + ["commit", "-q", "-m", f"Cards: {name}"], check=True)
         for _ in range(3):
             subprocess.run(git + ["pull", "-q", "--rebase"], check=False)
@@ -201,6 +234,7 @@ def main():
         except Exception as e:
             log.warning(f"  Look not written: {e}")
 
+        clear_old_cards(slugify(name))
         log.info(f"Generating {OPTIONS} options for {name} ({era})…")
         saved_paths = []
         raw_urls    = []
@@ -208,7 +242,9 @@ def main():
         for opt in range(OPTIONS):
             try:
                 prompt   = build_image_prompt(player, opt)
-                art      = fetch_image(oai, prompt)
+                art      = fetch_with_retry(oai, prompt, f"{name} option {opt + 1}")
+                if art is None:
+                    continue
                 filename = f"{slugify(name)}_{era}_opt{opt + 1}.png"
                 filepath = Path(CARDS_DIR) / filename
                 art.save(filepath, "PNG")
@@ -219,14 +255,15 @@ def main():
                     raw_urls.append(url)
 
                 log.info(f"  ✓ Option {opt + 1}: {filename}")
-                time.sleep(1)  # brief pause between API calls
             except Exception as e:
                 log.error(f"  ✗ Option {opt + 1}: {e}")
 
         # One back per player, drawn by the image model from exact text
         back_url = None
         try:
-            back = fetch_image(oai, back_prompt(player))
+            back = fetch_with_retry(oai, back_prompt(player), f"{name} back")
+            if back is None:
+                raise RuntimeError("back image failed")
             back_name = f"{slugify(name)}_{era}_back.png"
             back.save(Path(CARDS_DIR) / back_name, "PNG")
             saved_paths.append(str(Path(CARDS_DIR) / back_name))
@@ -236,7 +273,7 @@ def main():
             log.error(f"  ✗ Back: {e}")
 
         # Put this player's images on GitHub before Notion points at them
-        if raw_urls and not publish(saved_paths, name):
+        if raw_urls and not publish([f"{CARDS_DIR}/{slugify(name)}_*"], name):
             log.error(f"  Images for {name} not pushed; leaving status unchanged")
             continue
 

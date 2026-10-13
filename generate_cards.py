@@ -206,7 +206,7 @@ def github_raw_url(filename: str) -> str | None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    oai    = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    oai    = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=180, max_retries=0)
     claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"]) if os.getenv("ANTHROPIC_API_KEY") else None
     notion = NotionClient()
     Path(CARDS_DIR).mkdir(exist_ok=True)

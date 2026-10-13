@@ -799,8 +799,8 @@ def front_prompt(player: dict, option_idx: int, uniform: str = "") -> str:
     era = era_for(player)
     year = card_year(player)
     lines = "\n".join(f"- {t}" for t in front_text_lines(player))
-    medium = ("It is an illustration, not a photograph: a character study where the pose and face tell "
-              "the player's story. " if era in ILLUSTRATED_ERAS else "")
+    medium = ("It is an illustration, not a photograph: a character portrait with a distinct personality. "
+              if era in ILLUSTRATED_ERAS else "")
     framing = ["three-quarter view", "slight turn to the other side", "straight-on"][option_idx % 3]
     return (
         f"Vintage baseball card, front side, printed in {year}. It looks like {FRONT_LOOK[era]}. "

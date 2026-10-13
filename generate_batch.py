@@ -171,8 +171,10 @@ Rules for stats:
 Rules for the card artist (not part of the post, no length pressure beyond the limits below):
 - look (max 200 characters): the player's fixed appearance, so every image shows the same man.
   Age, build, face, hair, facial hair, complexion, and one distinguishing feature. Period-plausible.
-- pose (max 150 characters): body language and expression for the card portrait that quietly acts out
-  the story (example: "standing rigidly upright, chin lifted, holding a glove he clearly dislikes touching").
+- pose (max 150 characters): body language and expression for the card portrait. Give him character.
+  It may hint at the story, but never illustrate it literally; often it is just a natural period card pose
+  with a telling expression. Subtle beats on the nose. (Example of a good hint: "standing rigidly upright,
+  chin lifted, holding his glove a little away from his body.")
 
 Rules for copy (posts are capped at 280 characters; any entry over is thrown away):
 - stat_note + story TOGETHER must be 140 characters or fewer. Count them.

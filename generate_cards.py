@@ -103,8 +103,9 @@ Story: {player.get('story')}
 
 look (max 200 characters): his fixed appearance so every image shows the same man. Age, build, face,
 hair, facial hair, complexion, and one distinguishing feature. Period-plausible.
-pose (max 150 characters): body language and expression for the card portrait that quietly acts out
-the story, deadpan, no props that contradict it."""}],
+pose (max 150 characters): body language and expression for the card portrait. Give him character.
+It may hint at the story but never illustrate it literally; often just a natural period card pose with
+a telling expression. Subtle beats on the nose."""}],
     )
     for block in msg.content:
         if block.type == "tool_use":

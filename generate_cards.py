@@ -24,13 +24,15 @@ import re
 import time
 from pathlib import Path
 
+import anthropic
 import openai
+import subprocess
 import requests
 from dotenv import load_dotenv
 from PIL import Image
 
-from card_art import CARD_H, CARD_W, back_prompt, era_for, front_layout_prompt, stamp_front
-from config import CARDS_DIR, ERA_STYLES, OPENAI_IMAGE_MODEL, WORDMARK_STYLES
+from card_art import CARD_H, CARD_W, back_prompt, era_for, front_prompt
+from config import CARDS_DIR, CLAUDE_DRAFT_MODEL, ERA_STYLES, OPENAI_IMAGE_MODEL, WORDMARK_STYLES
 from teams import TEAM_BY_NAME
 from notion_client import NotionClient
 
@@ -63,30 +65,75 @@ def uniform_text(team: str, era: str) -> str:
 
 
 def build_image_prompt(player: dict, option_idx: int) -> str:
-    era = era_for(player)
-    style = ERA_STYLES[era]
-    year = player.get("year_start", 1925)
-    team = player.get("team", "Unknown")
-    position = player.get("position", "OF")
-    angle = PORTRAIT_ANGLES[option_idx % len(PORTRAIT_ANGLES)]
-    uniform = uniform_text(team, era)
-    layout_rule = front_layout_prompt(era)
-    text_rule = (
-        "Apart from the jersey wordmark, do not write any text anywhere on the card. "
-        if uniform else "Do not write any text anywhere on the card. "
-    )
+    return front_prompt(player, option_idx, uniform=uniform_text(player.get("team", ""), era_for(player)))
 
-    return (
-        f"Vintage baseball card art. {style['description']} "
-        f"The player is a {position} for the {team}, active circa {year}. "
-        f"{uniform}"
-        f"Pose: {angle}. "
-        f"{layout_rule}"
-        f"{text_rule}"
-        f"The card should show authentic aging: wear, minor creases, and slight fading "
-        f"consistent with a card printed in {year}. "
-        f"Aspect ratio roughly 3:4 (portrait card)."
+
+# ── Player look (for players written before the writer produced one) ─────────
+
+LOOK_TOOL = {
+    "name": "submit_look",
+    "description": "Describe the player's fixed appearance and card pose.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "look": {"type": "string"},
+            "pose": {"type": "string"},
+        },
+        "required": ["look", "pose"],
+    },
+}
+
+
+def ensure_look(claude, notion, player: dict) -> None:
+    """Write a Look and Pose for players that lack one, and save them to Notion."""
+    if player.get("look") and player.get("pose"):
+        return
+    if claude is None:
+        return
+    msg = claude.messages.create(
+        model=CLAUDE_DRAFT_MODEL,
+        max_tokens=600,
+        tools=[LOOK_TOOL],
+        tool_choice={"type": "tool", "name": "submit_look"},
+        messages=[{"role": "user", "content": f"""Describe this fictional ballplayer for a card illustrator.
+
+{player.get('name')} | {player.get('position')}, {player.get('team')} | {player.get('years')}
+Stat note: {player.get('stat_note')}
+Story: {player.get('story')}
+
+look (max 200 characters): his fixed appearance so every image shows the same man. Age, build, face,
+hair, facial hair, complexion, and one distinguishing feature. Period-plausible.
+pose (max 150 characters): body language and expression for the card portrait that quietly acts out
+the story, deadpan, no props that contradict it."""}],
     )
+    for block in msg.content:
+        if block.type == "tool_use":
+            player["look"] = block.input["look"].strip()
+            player["pose"] = block.input["pose"].strip()
+            try:
+                notion.save_look(player["page_id"], player["look"], player["pose"])
+            except Exception as e:
+                log.warning(f"  Could not save look to Notion: {e}")
+
+
+# ── Publishing ────────────────────────────────────────────────────────────────
+
+def publish(paths: list, name: str) -> bool:
+    """In GitHub Actions, commit and push this player's images right away so links work."""
+    if not os.getenv("GITHUB_ACTIONS"):
+        return True
+    git = ["git", "-c", "user.name=HalluStats Bot", "-c", "user.email=bot@hallustats.invalid"]
+    try:
+        subprocess.run(git + ["add", *paths], check=True)
+        subprocess.run(git + ["commit", "-q", "-m", f"Cards: {name}"], check=True)
+        for _ in range(3):
+            subprocess.run(git + ["pull", "-q", "--rebase"], check=False)
+            if subprocess.run(git + ["push", "-q"], check=False).returncode == 0:
+                return True
+            time.sleep(3)
+    except subprocess.CalledProcessError as e:
+        log.error(f"  git failed: {e}")
+    return False
 
 
 def fetch_image(client: openai.OpenAI, prompt: str, size: str = None) -> Image.Image:
@@ -126,6 +173,7 @@ def github_raw_url(filename: str) -> str | None:
 
 def main():
     oai    = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"]) if os.getenv("ANTHROPIC_API_KEY") else None
     notion = NotionClient()
     Path(CARDS_DIR).mkdir(exist_ok=True)
 
@@ -147,6 +195,11 @@ def main():
                 player["year_start"] = 1920
                 player["year_end"]   = 1930
 
+        try:
+            ensure_look(claude, notion, player)
+        except Exception as e:
+            log.warning(f"  Look not written: {e}")
+
         log.info(f"Generating {OPTIONS} options for {name} ({era})…")
         saved_paths = []
         raw_urls    = []
@@ -155,7 +208,6 @@ def main():
             try:
                 prompt   = build_image_prompt(player, opt)
                 art      = fetch_image(oai, prompt)
-                art      = stamp_front(art, player)
                 filename = f"{slugify(name)}_{era}_opt{opt + 1}.png"
                 filepath = Path(CARDS_DIR) / filename
                 art.save(filepath, "PNG")
@@ -176,10 +228,16 @@ def main():
             back = fetch_image(oai, back_prompt(player))
             back_name = f"{slugify(name)}_{era}_back.png"
             back.save(Path(CARDS_DIR) / back_name, "PNG")
+            saved_paths.append(str(Path(CARDS_DIR) / back_name))
             log.info(f"  ✓ Back: {back_name}")
             back_url = github_raw_url(back_name)
         except Exception as e:
             log.error(f"  ✗ Back: {e}")
+
+        # Put this player's images on GitHub before Notion points at them
+        if raw_urls and not publish(saved_paths, name):
+            log.error(f"  Images for {name} not pushed; leaving status unchanged")
+            continue
 
         if raw_urls:
             try:

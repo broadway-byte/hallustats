@@ -193,6 +193,8 @@ class NotionClient:
             "critic_note": self._rich_text(p, "Critic Note"),
             "card_option_urls": self._files(p, "Card Options"),
             "seasons": self._seasons(p),
+            "look": self._rich_text(p, "Look"),
+            "pose": self._rich_text(p, "Pose"),
         }
 
     # ── public query methods ──────────────────────────────────────────────────
@@ -231,6 +233,12 @@ class NotionClient:
         ]})
         return [self._parse_player(p) for p in pages]
 
+    def save_look(self, page_id: str, look: str, pose: str):
+        self._patch(f"/pages/{page_id}", {"properties": {
+            "Look": {"rich_text": [{"text": {"content": look[:1900]}}]},
+            "Pose": {"rich_text": [{"text": {"content": pose[:1900]}}]},
+        }})
+
     def set_status(self, page_id: str, status: str):
         self._patch(f"/pages/{page_id}", {"properties": {"Status": {"select": {"name": status}}}})
 
@@ -267,6 +275,8 @@ class NotionClient:
             "Stat Note": rt(player.get("stat_note", "")),
             "Story": rt(player.get("story", "")),
             "Critic Note": rt(player.get("critic_note", "")),
+            "Look": rt(player.get("look", "")),
+            "Pose": rt(player.get("pose", "")),
         }
         # Season lines as readable text, split into Notion's 2,000-character text pieces
         if player.get("seasons"):

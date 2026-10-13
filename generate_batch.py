@@ -168,6 +168,12 @@ Rules for stats:
   Seasons should look like a real minor-league career: partial first and last years, an off year, an injury year if the story mentions one.
 - Every number in stat_note and story must agree with the season lines.
 
+Rules for the card artist (not part of the post, no length pressure beyond the limits below):
+- look (max 200 characters): the player's fixed appearance, so every image shows the same man.
+  Age, build, face, hair, facial hair, complexion, and one distinguishing feature. Period-plausible.
+- pose (max 150 characters): body language and expression for the card portrait that quietly acts out
+  the story (example: "standing rigidly upright, chin lifted, holding a glove he clearly dislikes touching").
+
 Rules for copy (posts are capped at 280 characters; any entry over is thrown away):
 - stat_note + story TOGETHER must be 140 characters or fewer. Count them.
 - Example at the right length (126 characters total):
@@ -229,13 +235,15 @@ DRAFT_TOOL = {
                                 "required": ["year", "g"],
                             },
                         },
+                        "look":             {"type": "string"},
+                        "pose":             {"type": "string"},
                         "stat_note":        {"type": "string"},
                         "story":            {"type": "string"},
                     },
                     "required": [
                         "name", "position", "team", "year_start", "year_end",
                         "era", "career_war", "best_season_year",
-                        "seasons", "stat_note", "story",
+                        "seasons", "look", "pose", "stat_note", "story",
                     ],
                 },
             }
@@ -565,6 +573,8 @@ def main():
                 "stat_note":        p["stat_note"],
                 "story":            p["story"],
                 "seasons":          p["seasons"],
+                "look":             p.get("look", ""),
+                "pose":             p.get("pose", ""),
                 "score":            p.get("score"),
                 "critic_note":      p.get("critic_note", ""),
             })

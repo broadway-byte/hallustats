@@ -43,13 +43,15 @@ def era_for(player: dict) -> str:
 
 
 def card_year(player: dict) -> int:
-    """Year the card was printed: the season after his best year, kept inside his career and era."""
+    """Year the card was printed: the season after his last, kept inside his era.
+
+    Dating cards after the career means a story never refers to a season the
+    card could not have known about.
+    """
     start = player.get("year_start") or 1925
     end = player.get("year_end") or start
-    best = player.get("best_season_year") or start
-    y = min(max(best + 1, start + 1), end + 1)
     lo, hi = ERA_STYLES[era_for(player)]["years"]
-    return min(max(y, lo), hi)
+    return min(max(end + 1, lo), hi)
 
 
 def seed_for(player: dict, salt: str = "") -> int:
@@ -662,7 +664,8 @@ def back_prompt(player: dict) -> str:
         tone = "black-and-white" if year in BW_BACK_PHOTO_YEARS else "color"
         t = TEAM_BY_NAME.get(team)
         kit = f" in a {t['kit']['colors'][0]} and {t['kit']['colors'][1]} uniform" if t else ""
-        extras.append(f"Include a small {tone} head-and-shoulders photo of the player{kit}.")
+        extras.append(f"Include a small {tone} head-and-shoulders photo of the player{kit}. "
+                      f"{look_text(dict(player, pose=''))}")
 
     lines = "\n".join(f"- {t}" for t in text)
     return (
@@ -672,4 +675,139 @@ def back_prompt(player: dict) -> str:
         f"soft corner wear. {' '.join(extras)} "
         f"Print exactly this text, spelled exactly as written, and no other words, numbers or logos:\n"
         f"{lines}"
+    )
+
+
+# ── Image-generated fronts ────────────────────────────────────────────────────
+# The image model draws the whole front, name plate included, from exact text.
+# Older eras are illustrations that act out the story; later eras are photos
+# with period name plates.
+
+FRONT_LOOK = {
+    "tobacco": (
+        "a 1909-1911 T206 tobacco card: a hand-colored lithograph of the player standing full length in "
+        "a posed stance on a patch of infield dirt, against a flat painted background of one deep color "
+        "(brick red, olive, sky blue or mustard), inside a plain cream border. Below the picture, in the "
+        "cream border, a two-line caption in small black serif capitals"
+    ),
+    "goudey": (
+        "a 1933 Goudey gum card: a vivid painted portrait, head and shoulders, against a bold flat color "
+        "background (bright red, yellow, green or orange), thick cream border, slightly stylized like "
+        "commercial illustration of the period. At the bottom, a narrow cream banner with the player's "
+        "name in small capitals and the gum brand in bold red capitals beneath it"
+    ),
+    "bowman": (
+        "an early-1950s Bowman gum card: a painted oil-portrait illustration, waist up, visible brushwork and "
+        "canvas texture, a plain soft pastel background, thin cream border. Across the bottom, a cream name "
+        "panel with small double rule lines and a dot at each side: the name in large bold black capitals, "
+        "the team in red capitals beneath it, and the position in bold black at the right end of the panel"
+    ),
+    "topps52": (
+        "a 1952-1953 Topps card: a colorized, painted-over photograph portrait, white border. A bordered "
+        "name box at the lower left holds a small round team logo, the name in bold black capitals and the "
+        "team in smaller red capitals. A facsimile autograph in dark ink runs across the lower part of the picture"
+    ),
+    "topps66": (
+        "a mid-1960s Topps card: a large headshot photograph beside a smaller full-length action photo cut "
+        "out on a solid bright color panel (yellow, pink or orange). A diagonal color banner across the top "
+        "left corner carries the team nickname in bold white capitals. Along the bottom, a bold color name "
+        "bar: the name in large white condensed capitals, the position in black italic script, and the full "
+        "team name in yellow capitals"
+    ),
+    "topps76": (
+        "a mid-1970s Topps card: a color photograph inside a two-tone colored border, the team name in large "
+        "bold colored letters across the top, a round pennant-style badge with the position in a lower "
+        "corner, and the name in black capitals on a white banner along the bottom"
+    ),
+    "upperdeck": (
+        "a late-1980s premium card: a glossy color action photograph, a bold diagonal stripe in the team "
+        "colors along one edge carrying the team name, the name in white italic capitals on a dark color bar "
+        "with thin pinstripe accents, the position beside it, a small round team logo badge in a corner, and a "
+        "tiny silver hologram square"
+    ),
+    "chrome": (
+        "a late-1990s chrome card: a refractor rainbow-foil border, an action photograph, the team name as a "
+        "bold metallic script logo, the name in embossed silver capitals on a curved foil nameplate, and the "
+        "position in a small foil shield"
+    ),
+}
+
+OLD_POSITIONS = {"1B": "1st B.", "2B": "2nd B.", "3B": "3rd B.", "SS": "S. S.", "C": "Catcher",
+                 "LF": "L. F.", "CF": "C. F.", "RF": "R. F.", "SP": "Pitcher", "RP": "Pitcher"}
+POSITION_WORDS = {"1B": "first base", "2B": "second base", "3B": "third base", "SS": "shortstop",
+                  "C": "catcher", "LF": "left field", "CF": "center field", "RF": "right field",
+                  "SP": "pitcher", "RP": "pitcher"}
+ILLUSTRATED_ERAS = {"tobacco", "goudey", "bowman", "topps52"}
+
+
+def _plain_name(name: str) -> str:
+    """Name as printed on a name plate, nickname quotes kept: LEROY "WELT" CONNATSER."""
+    return " ".join(name.split())
+
+
+def _signature_name(name: str) -> str:
+    """How he would sign: first and last name, no nickname."""
+    import re as _re
+    return " ".join(_re.sub(r'"[^"]*"', "", name).split())
+
+
+def _caption_name(name: str) -> str:
+    """T206 captions used what the player was called: the nickname, then the surname."""
+    import re as _re
+    m = _re.search(r'"([^"]+)"', name)
+    surname = name.replace('"', "").split()[-1]
+    return f"{m.group(1)} {surname}" if m else _plain_name(name)
+
+
+def front_text_lines(player: dict) -> list:
+    """Every word printed on the front's name plate, exactly."""
+    era = era_for(player)
+    name = player.get("name", "")
+    team = player.get("team", "")
+    city = _city_of(team)
+    nick = team[len(city):].strip() if team.startswith(city) else team
+    pos = player.get("position", "")
+    if era == "tobacco":
+        return [f"{_caption_name(name).upper()}, {OLD_POSITIONS.get(pos, pos)}, {city.upper()}", nick.upper()]
+    if era == "goudey":
+        from config import FRONT_BRAND_BANNER
+        return [_plain_name(name).upper(), FRONT_BRAND_BANNER]
+    if era == "bowman":
+        return [_plain_name(name).upper(), team.upper(), pos]
+    if era == "topps52":
+        return [_plain_name(name).upper(), team.upper(), f"Signature: {_signature_name(name)}"]
+    if era == "topps66":
+        return [nick.upper(), _plain_name(name).upper(), POSITION_WORDS.get(pos, pos), team.upper()]
+    if era == "topps76":
+        return [team.upper(), pos, _plain_name(name).upper()]
+    return [team.upper(), _plain_name(name).upper(), pos]
+
+
+def look_text(player: dict) -> str:
+    """The same man in every image: fixed appearance plus the pose that acts out his story."""
+    look = (player.get("look") or "").strip()
+    pose = (player.get("pose") or "").strip()
+    out = ""
+    if look:
+        out += f"The player, identical in every image of him: {look}. "
+    if pose:
+        out += f"Pose and expression: {pose}. "
+    return out
+
+
+def front_prompt(player: dict, option_idx: int, uniform: str = "") -> str:
+    era = era_for(player)
+    year = card_year(player)
+    lines = "\n".join(f"- {t}" for t in front_text_lines(player))
+    medium = ("It is an illustration, not a photograph: a character study where the pose and face tell "
+              "the player's story. " if era in ILLUSTRATED_ERAS else "")
+    framing = ["three-quarter view", "slight turn to the other side", "straight-on"][option_idx % 3]
+    return (
+        f"Vintage baseball card, front side, printed in {year}. It looks like {FRONT_LOOK[era]}. "
+        f"{medium}{look_text(player)}{uniform}"
+        f"Framing: {framing}. "
+        f"Authentic age for a card printed in {year}: wear, soft corners, a crease or two, slight fading. "
+        f"Flat straight-on scan, the card fills the frame, aspect ratio roughly 3:4 (portrait). "
+        f"Print exactly this text on the card, spelled exactly as written; apart from the jersey wordmark "
+        f"there are no other words or numbers:\n{lines}"
     )

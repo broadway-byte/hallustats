@@ -74,6 +74,10 @@ IMAGE_PAUSE = 13          # seconds between image calls, to stay under per-minut
 RETRY_WAITS = (30, 60, 90)
 
 
+class OutOfCredits(Exception):
+    pass
+
+
 def fetch_with_retry(client, prompt: str, label: str):
     """Image call that waits out rate limits and server hiccups; reports the final error."""
     last = None
@@ -87,6 +91,8 @@ def fetch_with_retry(client, prompt: str, label: str):
             return img
         except Exception as e:
             last = f"{type(e).__name__}: {str(e)[:200]}"
+            if "insufficient_quota" in str(e) or "credit_balance" in str(e):
+                raise OutOfCredits(str(e)[:300])
             status = getattr(e, "status_code", None)
             retryable = status in (429, 500, 502, 503, 504) or "rate" in str(e).lower() or "timeout" in str(e).lower()
             if not retryable:
@@ -215,6 +221,18 @@ def main():
     log.info(f"{len(players)} players need cards (Copy Approved or Redraw Cards)")
 
     for player in players:
+        try:
+            run_player(oai, claude, notion, player)
+        except OutOfCredits as e:
+            print(f"::error::OpenAI account is out of credits; stopping. Add credits and run again. ({e})")
+            raise SystemExit(1)
+
+    log.info("Card generation complete.")
+
+
+def run_player(oai, claude, notion, player):
+    """Draw, publish and attach one player's cards."""
+    if True:
         name = player["name"]
         era  = era_for(player)
 
@@ -255,6 +273,8 @@ def main():
                     raw_urls.append(url)
 
                 log.info(f"  ✓ Option {opt + 1}: {filename}")
+            except OutOfCredits:
+                raise
             except Exception as e:
                 log.error(f"  ✗ Option {opt + 1}: {e}")
 
@@ -269,13 +289,15 @@ def main():
             saved_paths.append(str(Path(CARDS_DIR) / back_name))
             log.info(f"  ✓ Back: {back_name}")
             back_url = github_raw_url(back_name)
+        except OutOfCredits:
+            raise
         except Exception as e:
             log.error(f"  ✗ Back: {e}")
 
         # Put this player's images on GitHub before Notion points at them
         if raw_urls and not publish([f"{CARDS_DIR}/{slugify(name)}_*"], name):
             log.error(f"  Images for {name} not pushed; leaving status unchanged")
-            continue
+            return
 
         if raw_urls:
             try:
@@ -290,7 +312,6 @@ def main():
                 "set it in .env and re-run after pushing to attach Notion URLs"
             )
 
-    log.info("Card generation complete.")
 
 
 if __name__ == "__main__":
